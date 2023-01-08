@@ -1,0 +1,11 @@
+interface markdown-imports {
+}
+
+interface markdown-exports {
+  render: func(input: string) -> string
+}
+
+world markdown {
+  import imports: markdown-imports
+  default export markdown-exports
+}
