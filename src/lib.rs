@@ -19,7 +19,7 @@ pub fn render(input: String) -> String {
     options.insert(Options::ENABLE_TASKLISTS);
 
     let parser = CustomParser(Parser::new_ext(&input, options));
-    let mut html_output = String::with_capacity(&input.len() * 3 / 2);
+    let mut html_output = String::with_capacity(&input.len());
     html::push_html(&mut html_output, parser);
     html_output
 }
