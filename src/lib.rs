@@ -18,8 +18,8 @@ pub fn render(input: String) -> String {
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_TASKLISTS);
 
-    let parser = Parser::new_ext(&input, options);
-    let mut html_output = String::new();
+    let parser = CustomParser(Parser::new_ext(&input, options));
+    let mut html_output = String::with_capacity(&input.len() * 3 / 2);
     html::push_html(&mut html_output, parser);
     html_output
 }
