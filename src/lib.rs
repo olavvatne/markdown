@@ -1,6 +1,11 @@
 use once_cell::sync::Lazy;
 use pulldown_cmark::{html, CodeBlockKind, CowStr, Event, Options, Parser, Tag};
-use syntect::{highlighting::ThemeSet, html::highlighted_html_for_string, parsing::SyntaxSet};
+use syntect::html::{start_highlighted_html_snippet, append_highlighted_html_for_styled_line, IncludeBackground};
+use std::sync::Mutex;
+use syntect::easy::HighlightLines;
+use syntect::parsing::SyntaxSet;
+use syntect::highlighting::{ThemeSet};
+use syntect::util::{LinesWithEndings};
 use wasm_bindgen::prelude::*;
 
 mod utils;
@@ -19,9 +24,25 @@ pub fn render(input: String) -> String {
     options.insert(Options::ENABLE_TASKLISTS);
 
     let parser = CustomParser(Parser::new_ext(&input, options));
-    let mut html_output = String::with_capacity(&input.len());
+    let mut html_output = String::with_capacity(input.len());
     html::push_html(&mut html_output, parser);
     html_output
+}
+
+static SYNTAX_SET: Lazy<Mutex<Option<SyntaxSet>>> = Lazy::new(|| Mutex::new(None));
+static THEME_SET: Lazy<Mutex<Option<ThemeSet>>> = Lazy::new(|| Mutex::new(None));
+
+// Unsafe here at the momoent
+#[wasm_bindgen(js_name = loadSyntax)]
+pub unsafe fn load_syntax(syntax: String) {
+    let mut syntax_state = SYNTAX_SET.lock().unwrap();
+    // *syntax_state = Some(SyntaxSet::load_defaults_newlines());
+}
+
+#[wasm_bindgen(js_name = loadTheme)]
+pub unsafe fn load_theme(theme: String) {
+    let mut theme_state = THEME_SET.lock().unwrap();
+    // *theme_state = Some(ThemeSet::load_defaults());
 }
 
 struct CustomParser<'e>(Parser<'e, 'e>);
@@ -42,9 +63,6 @@ impl<'e> Iterator for CustomParser<'e> {
     }
 }
 
-static SYNTAX_SET: Lazy<SyntaxSet> = Lazy::new(|| SyntaxSet::load_defaults_newlines());
-static THEME_SET: Lazy<ThemeSet> = Lazy::new(|| ThemeSet::load_defaults());
-
 impl<'e> CustomParser<'e> {
     fn parse_code_block<'a>(&'a mut self) -> Option<Event<'e>> {
         let mut to_highlight = String::new();
@@ -53,21 +71,49 @@ impl<'e> CustomParser<'e> {
             match event {
                 Event::Text(t) => {
                     to_highlight.push_str(t);
+                    // to_highlight.push('\n')
                 }
                 Event::End(Tag::CodeBlock(token)) => {
-                    let ss = &SYNTAX_SET;
-                    let syntax = if let CodeBlockKind::Fenced(val) = token {
-                        ss.find_syntax_by_extension(val)
-                            .unwrap_or_else(|| ss.find_syntax_plain_text())
-                    } else {
-                        ss.find_syntax_plain_text()
-                    };
+                    let theme = THEME_SET.lock().unwrap();
+                    let syntax = SYNTAX_SET.lock().unwrap();
+                    match &*syntax {
+                        Some(set) => {
+                            let syntax = if let CodeBlockKind::Fenced(val) = token {
+                                set.find_syntax_by_extension(val)
+                                    .unwrap_or_else(|| set.find_syntax_plain_text())
+                            } else {
+                                set.find_syntax_plain_text()
+                            };
 
-                    let theme = &THEME_SET.themes["base16-eighties.dark"];
-                    let html =
-                        highlighted_html_for_string(&to_highlight, ss, &syntax, theme).unwrap();
+                            let theme = &theme.as_ref().unwrap().themes["base16-eighties.dark"];
+                            let mut highlighter = HighlightLines::new(syntax, theme);
+                            let (mut output, bg) = start_highlighted_html_snippet(theme);
+                        
+                            for line in LinesWithEndings::from(&to_highlight) {
+                                let regions = highlighter.highlight_line(line, &set).unwrap();
+                                append_highlighted_html_for_styled_line(
+                                    &regions[..],
+                                    IncludeBackground::IfDifferent(bg),
+                                    &mut output,
+                                ).unwrap();
+                            }
+                            output.push_str("</pre>\n");
+                            // let html =
+                            //     highlighted_html_for_string(&to_highlight, set, &syntax, theme)
+                            //         .unwrap();
+                            // return Some(Event::Html(CowStr::Boxed(html.into_boxed_str())));
+                            return Some(Event::Html(CowStr::Boxed(output.into_boxed_str())));
 
-                    return Some(Event::Html(CowStr::Boxed(html.into_boxed_str())));
+                            // return Some(Event::Html(CowStr::Boxed(to_highlight.into_boxed_str())));
+                        }
+                        None => {
+                            let mut raw_pre_html = String::new();
+                            raw_pre_html.push_str("<pre>");
+                            raw_pre_html.push_str(to_highlight.as_str());
+                            raw_pre_html.push_str("</pre>");
+                            return Some(Event::Html(CowStr::Boxed(raw_pre_html.into_boxed_str())));
+                        }
+                    }
                 }
                 _ => {}
             }
